@@ -16,12 +16,16 @@ Chao Ren        2011/07/01        2.0           Change               529517386@q
 Hao Luo         2011/01/01        2.0           Change               luohao135680@gmail.com
 *****************************************************************************************************************************/
 
- 
-
+#include<math.h>
+#include<stdlib.h>
 #include "ssd.h"
 #include "hash.h"
 #include <unistd.h>
+#include <string.h>
 #include "insert_to_buffer.h"
+
+#define WINDOW_SIZE 10    // 滑动窗口大小--已改
+#define THRESHOLD 0.8f   // 1/10阈值
 
 int index1 = 0, index2 = 0, index3 = 0, RRcount = 0;
 float aveber=0;
@@ -1912,31 +1916,7 @@ void trace_output(struct ssd_info* ssd){
 					ssd->newest_req_with_csb = 0;
 					ssd->newest_req_with_msb = 0;
 
-                    //分给读
-                    struct buffer_group *buffer_node,*temp_node;
-                    buffer_node = ssd->dram->buffer->buffer_tail;
-                    if((buffer_node->access_Count/(ssd->dram->databuffer->buffer_tail->access_Count))<1/10){//校验缓存与读缓存最后一page命中数之比小于1/10,则分给读缓存
-                        temp_node = buffer_node->LRU_link_pre;
-                        ssd->dram->buffer->current_buffer_page--;
-                        hash_del(ssd->dram->buffer, (HASH_NODE *) buffer_node);
-                        hash_node_free(ssd->dram->buffer, (HASH_NODE *) buffer_node);
-                        ssd->dram->buffer->max_buffer_page--;
-                        buffer_node = temp_node;
-                        ssd->dram->buffer->buffer_tail = buffer_node;
-                        ssd->dram->databuffer->max_buffer_page++;
-                    }else if ((buffer_node->access_Count/(ssd->dram->databuffer->buffer_tail->access_Count))==1/10){//不分
 
-                    }else{                                                  //校验缓存与读缓存最后一page命中数之比大于1/10,则分给写缓存
-                        buffer_node = ssd->dram->databuffer->buffer_tail;
-                        temp_node = buffer_node->LRU_link_pre;
-                        ssd->dram->databuffer->current_buffer_page--;
-                        hash_del(ssd->dram->databuffer, (HASH_NODE *) buffer_node);
-                        hash_node_free(ssd->dram->databuffer, (HASH_NODE *) buffer_node);
-                        ssd->dram->databuffer->max_buffer_page--;
-                        buffer_node = temp_node;
-                        ssd->dram->databuffer->buffer_tail = buffer_node;
-                        ssd->dram->buffer->max_buffer_page++;
-                    }
 
 					//***************************************************************************
 					int channel;
@@ -3068,7 +3048,7 @@ void gc_eject(struct ssd_info *ssd, unsigned long long raidid) {
 }
 
 void cache_fail(struct ssd_info *ssd, struct buffer_group *buffer_node) {
-    int free_sector = ssd->dram->buffer->max_buffer_page - ssd->dram->buffer->current_buffer_page;
+    int free_sector = ssd->dram->buffer->current_limit - ssd->dram->buffer->current_buffer_page;
     if (free_sector != 0) {
         return;
     }
@@ -3181,10 +3161,14 @@ void ppc_cache(struct ssd_info *ssd, int lpn, unsigned int state, struct request
         buffer_node->stored |= state;
         ssd->cacheHit++;
         buffer_node->access_Count++;//命中访问次数+1
+//        if(buffer_node->access_Count  > 200000){
+//            printf("AC:%u\n",buffer_node->access_Count);
+//            printf("CHit：%u\n",ssd->cacheHit);
+//        }
     } else {
         ssd->cachedoNotHit++;
         unsigned char flag = 0;
-        free_sector = ssd->dram->buffer->max_buffer_page - ssd->dram->buffer->current_buffer_page;
+        free_sector = ssd->dram->buffer->current_limit - ssd->dram->buffer->current_buffer_page;
 
         if (free_sector >= 1) {
             flag = 1;
@@ -3492,6 +3476,20 @@ struct ssd_info *no_buffer_distribute(struct ssd_info *ssd)
 	last_lpn=(req->lsn+req->size-1)/ssd->parameter->subpage_page;
 	first_lpn=req->lsn/ssd->parameter->subpage_page;
 
+    if(ssd->completed_request_count%10000 == 0 && (ssd->dram->buffer->current_buffer_page == ssd->dram->buffer->current_limit || ssd->dram->databuffer->current_buffer_page == ssd->dram->databuffer->current_limit)){        //时间窗口为10000请求，每到达则进行一次缓存优化
+        ssd->max_profit_index = optimize_cache_allocation(ssd);
+        printf("max_profit_index:%d\n",ssd->max_profit_index);
+        if(ssd->max_profit_index < 0){
+            exit(-1);
+        }
+    }
+
+//    if(ssd->completed_request_count%10000 == 0 && (ssd->dram->buffer->current_buffer_page == ssd->dram->buffer->current_limit && ssd->dram->databuffer->current_buffer_page == ssd->dram->databuffer->current_limit)){        //时间窗口为10000请求，每到达则进行一次缓存优化
+//        ssd->max_profit_index = compare_cache_sliding(ssd);
+//
+//        printf("max_profit_index:%d\n",ssd->max_profit_index);
+//    }
+
 	if(req->operation==READ)        
 	{		
 		while(lpn<=last_lpn) 		
@@ -3500,11 +3498,32 @@ struct ssd_info *no_buffer_distribute(struct ssd_info *ssd)
 			lpn = lpn % ssd->stripe.checkStart;
 			lpn += 1;
             result = find_node_READ(ssd, lpn, req);
-            if ( result == -1) {  //用一个int型接收返回值，提高可读性
+            if ( result == -1) {  //1.请求数大于10000 && 读缓存满了 && 最大收益指数小于当前写额度 && 写额度大于1/4总容量
+                if(ssd->completed_request_count>10000 && ssd->dram->databuffer->current_buffer_page >=ssd->dram->databuffer->current_limit && ssd->max_profit_index < ssd->dram->buffer->current_limit && ssd->dram->buffer->current_limit >= (ssd->dram->buffer->max_buffer_page)/4 ){
+                    Evict_one_node(ssd,ssd->dram->buffer);      //给读分
+                    ssd->max_profit_index++;
+                }
+//                if(ssd->max_profit_index > 0 ){
+//                    Evict_one_node(ssd,ssd->dram->buffer);      //给读分
+//                    ssd->max_profit_index--;
+//                }
+//                if(ssd->max_profit_index > 0 && ssd->dram->buffer->current_limit >= (ssd->dram->buffer->max_buffer_page)/4){
+//                    Evict_one_node(ssd,ssd->dram->buffer);      //给读分
+//                    ssd->max_profit_index--;
+//
+//                }
+
+
                 sub_state = (ssd->dram->map->map_entry[lpn].state & 0x7fffffff);
                 sub_size = size(sub_state);
                 sub = creat_sub_request(ssd, lpn, sub_size, sub_state, req, req->operation, 0, ssd->page2Trip[lpn]);
             }
+            if ( result == -2) {  //仅命中一部分的情况
+                sub_state = (ssd->dram->map->map_entry[lpn].state & 0x7fffffff);
+                sub_size = size(sub_state);
+                sub = creat_sub_request(ssd, lpn, sub_size, sub_state, req, req->operation, 0, ssd->page2Trip[lpn]);
+            }
+
 
 //			sub_state=(ssd->dram->map->map_entry[lpn].state&0x7fffffff);
 //			sub_size=size(sub_state);
@@ -3561,6 +3580,15 @@ struct ssd_info *no_buffer_distribute(struct ssd_info *ssd)
 			//printf("1111\n");
 			fprintf(ssd->footPoint,"%u\n",lpn);
 			if(ssd->dram->map->map_entry[lpn].state == 0){
+                if(ssd->completed_request_count>10000 && ssd->dram->buffer->current_buffer_page >=ssd->dram->buffer->current_limit && ssd->max_profit_index > ssd->dram->buffer->current_limit && ssd->dram->databuffer->current_limit >= (ssd->dram->databuffer->max_buffer_page)/4 ){
+                    Evict_one_node(ssd,ssd->dram->buffer);      //给写分
+                    ssd->max_profit_index--;
+                }
+//                if(ssd->max_profit_index < 0 && ssd->dram->databuffer->current_limit >= (ssd->dram->databuffer->max_buffer_page)/2){//已改--给写分
+//                    Evict_one_node(ssd,ssd->dram->databuffer);
+//                    ssd->max_profit_index++;
+//                }
+
 				creat_sub_write_request_for_raid(ssd,lpn, state, req, mask);
 			}else {
 				sub_size=size(state);
@@ -3578,3 +3606,306 @@ struct ssd_info *no_buffer_distribute(struct ssd_info *ssd)
 	return ssd;
 }
 
+
+// 降序排序比较函数---qsort()
+int compare_desc(const void* a, const void* b) {
+    return (*(int*)b - *(int*)a);
+}
+
+
+
+
+int countNodes(struct buffer_group* head){
+    int count = 0;
+    struct buffer_group* current = head;
+
+    while(current != NULL){
+        count++;
+        current = current->LRU_link_next;
+    }
+
+    return count;
+}
+
+
+// 获取统计信息（模拟原代码的get_statistic）
+void get_statistic(struct ssd_info* ssd,int* write_stats, int* read_stats, int size_in_write,int size_in_read) {
+    memset(write_stats, 0, size_in_write * sizeof(int)); // 置零数组
+    memset(read_stats, 0, size_in_read * sizeof(int));
+
+
+    struct buffer_group *buffer_node,*databuffer_node;
+    int i = 0,j = 0;
+    buffer_node = ssd->dram->buffer->buffer_head;
+    databuffer_node = ssd->dram->databuffer->buffer_head;
+    while(buffer_node!=NULL && i<size_in_write){
+        write_stats[i++] = buffer_node->access_Count;
+        buffer_node = buffer_node->LRU_link_next;
+    }
+    while(databuffer_node != NULL && j<size_in_read){
+        read_stats[j++] = databuffer_node->access_Count;
+        databuffer_node = databuffer_node->LRU_link_next;
+    }
+
+}
+
+int optimize_cache_allocation(struct ssd_info* ssd) {
+    int size_in_write = countNodes(ssd->dram->buffer->buffer_head); //计算两个缓存中各自的节点数量
+    int size_in_read =  countNodes(ssd->dram->databuffer->buffer_head);
+    int size_all = size_in_write + size_in_read;
+
+//     1. 初始化统计数组
+    int* write_stats = (int*)malloc(size_all * sizeof(int));
+    if(write_stats == NULL){
+        // 处理内存分配失败的情况，例如返回错误码或进行错误提示
+        return -1;
+    }
+    memset(write_stats, 0, size_all * sizeof(int));
+
+    int* read_stats = (int*)malloc(size_all * sizeof(int));
+    if(read_stats == NULL){
+        free(write_stats);  //如果读分配失败，写也需释放
+        return -1;
+    }
+    memset(read_stats, 0, size_all * sizeof(int));
+
+//     2. 获取读写统计（替换原get_statistic调用）
+    get_statistic(ssd,write_stats, read_stats, size_all,size_all);
+
+//     3. 降序排序
+    qsort(write_stats, size_in_write, sizeof(int), compare_desc);
+    qsort(read_stats, size_in_read, sizeof(int), compare_desc);
+
+
+
+
+    // 4. 计算累加数组
+    int* write_array = (int*)malloc(size_all * sizeof(int));
+    if (write_array == NULL) {
+        free(write_stats);
+        free(read_stats);
+        return -1;
+    }
+    memset(write_array, 0, size_all * sizeof(int));
+
+    int* read_array = (int*)malloc(size_all * sizeof(int));
+    if (read_array == NULL) {
+        free(write_stats);
+        free(read_stats);
+        free(write_array);
+        return -1;
+    }
+
+    memset(read_array, 0, size_all * sizeof(int));
+
+
+    write_array[0] = write_stats[0];
+    for (int i = 1; i < size_all; i++) {
+        write_array[i] = write_array[i-1] + write_stats[i]; //计算前 i 个结点的总访问次数
+    }
+
+    read_array[0] = read_stats[0];
+    for (int i = 1; i < size_all; i++) {
+        read_array[i] = read_array[i-1] + read_stats[i];
+//        printf("%d\n",read_array[i]);
+    }
+
+    // 5. 寻找最优分配比例
+    int max_profit_index = 0;
+    for (int j = 0; j < size_all; j++) {            //当一个时间窗口后，如果某一个缓存未装满，此时是不对的
+        int current_profit = write_array[j] * 10 +
+                             read_array[size_all - j - 1];
+        int max_profit = write_array[max_profit_index] * 10 +
+                         read_array[size_all - max_profit_index - 1];
+
+        if (current_profit > max_profit) {
+            max_profit_index = j;
+        }
+    }
+//     7. 释放内存
+    free(write_stats);
+    free(read_stats);
+    free(write_array);
+    free(read_array);
+
+    return max_profit_index;
+}
+
+void Evict_one_node(struct ssd_info* ssd, struct buffer_info_Hash* buffer){//弹一个结点腾空间
+    struct buffer_group *buffer_node;
+
+    if(buffer == ssd->dram->databuffer){   //给写分
+        buffer_node = ssd->dram->databuffer->buffer_tail;           //从尾部删，因为不管是LRU还是LFU，最后几个都是没有价值的
+        if(!buffer_node){
+            return;                                     //防御性检查：链表为空
+        }
+        // 1. 更新前驱节点的 next 指针（如果前驱存在）
+        if (buffer_node->LRU_link_pre) {
+            buffer_node->LRU_link_pre->LRU_link_next = NULL;
+        } else {
+            // 链表只有一个节点，删除后链表为空
+            buffer->buffer_head = NULL;
+        }
+
+        // 2. 更新 buffer_tail
+        ssd->dram->databuffer->buffer_tail = buffer_node->LRU_link_pre;
+
+        ssd->dram->databuffer->current_buffer_page--;
+        hash_del(ssd->dram->databuffer, (HASH_NODE *) buffer_node);
+        hash_node_free(ssd->dram->databuffer, (HASH_NODE *) buffer_node);
+        buffer_node = NULL;     //避免悬垂指针
+        if(ssd->dram->databuffer->current_limit > 0){ //边界检查
+            ssd->dram->databuffer->current_limit--;
+            ssd->dram->buffer->current_limit++;
+        }
+
+    }else if(buffer == ssd->dram->buffer){  //给读分
+        buffer_node = ssd->dram->buffer->buffer_tail;
+        if(!buffer_node){
+            return;
+        }
+        // 1. 更新前驱节点的 next 指针（如果前驱存在）
+        if (buffer_node->LRU_link_pre) {
+            buffer_node->LRU_link_pre->LRU_link_next = NULL;
+        } else {
+            // 链表只有一个节点，删除后链表为空
+            buffer->buffer_head = NULL;
+        }
+
+        // 2. 更新 buffer_tail
+        ssd->dram->buffer->buffer_tail = buffer_node->LRU_link_pre;
+
+        ssd->dram->buffer->current_buffer_page--;
+        hash_del(ssd->dram->buffer, (HASH_NODE *) buffer_node);
+        hash_node_free(ssd->dram->buffer, (HASH_NODE *) buffer_node);
+        buffer_node = NULL;     //避免悬垂指针
+        if(ssd->dram->buffer->current_limit >0){
+            ssd->dram->buffer->current_limit--;
+            ssd->dram->databuffer->current_limit++;
+        }
+
+    }
+    else{
+            // 处理不匹配的情况（可选）
+            printf("Error: Invalid buffer pointer in Evict_one_node\n");
+    }
+
+}
+
+//-------------------------------------------------------------------------
+
+// 计算数组最后n个元素的平均值
+float tail_average(int* arr, int size, int n) {
+    if (size == 0 || n <= 0) return 0.0f;
+
+    n = (n > size) ? size : n; // 不超过数组长度
+    int sum = 0;
+
+    for (int i = size - n; i < size; i++) {
+        sum += arr[i];
+
+    }
+
+
+    return (float)sum / n;
+}
+
+// 主比较函数
+int compare_cache_sliding(struct ssd_info* ssd) {
+    // 1. 获取缓存节点数
+    int size_in_write = countNodes(ssd->dram->buffer->buffer_head);
+    int size_in_read = countNodes(ssd->dram->databuffer->buffer_head);
+
+    // 2. 分配统计数组
+    int* write_stats = malloc(size_in_write * sizeof(int));
+    int* read_stats = malloc(size_in_read * sizeof(int));
+    if (!write_stats || !read_stats) {
+        free(write_stats); free(read_stats);
+        return -1;
+    }
+
+    // 3. 获取访问统计
+    get_statistic(ssd, write_stats, read_stats, size_in_write, size_in_read);
+
+    // 4. 计算读缓存基准值（最后5个的平均）
+    float read_avg = tail_average(read_stats, size_in_read, WINDOW_SIZE);
+    float write_avg = tail_average(write_stats, size_in_write, WINDOW_SIZE);
+    // 5. 滑动窗口比较写缓存
+    int count = 0;
+    int write_pos = size_in_write;
+    int read_pos = size_in_read;
+    int flag = 0;
+    if(write_avg / read_avg < THRESHOLD && ssd->dram->databuffer->current_buffer_page == ssd->dram->databuffer->current_limit){
+        flag = 1;
+        while (write_pos >= WINDOW_SIZE) {
+        // 5.1 获取当前窗口平均值
+
+        write_avg = tail_average(write_stats, write_pos, WINDOW_SIZE);
+        // 5.2 防除零处理
+        if (fabsf(read_avg) < 1e-6f) { // 读缓存均值为0
+            if (fabsf(write_avg) < 1e-6f) { // 写缓存也为0
+                return 0;
+            }
+        }
+            // 5.3 正常比较
+        else if (write_avg / read_avg < THRESHOLD) {
+            count += 10;
+        }else{
+            break;
+        }
+
+        // 5.4 窗口向前滑动
+        write_pos -= WINDOW_SIZE;
+        }
+    }else if(write_avg / read_avg == THRESHOLD){
+        return 0;
+    }else if(write_avg / read_avg > THRESHOLD && ssd->dram->buffer->current_buffer_page == ssd->dram->buffer->current_limit ){
+        flag = -1;
+        while(read_pos >= WINDOW_SIZE){
+            read_avg = tail_average(read_stats, read_pos, WINDOW_SIZE);
+            // 5.2 防除零处理
+            if (fabsf(write_avg) < 1e-6f) { // 读缓存均值为0
+                if (fabsf(read_avg) < 1e-6f) { // 写缓存也为0
+                    return 0;
+                }
+            }
+                // 5.3 正常比较
+            else if (write_avg / read_avg > THRESHOLD) {
+                count += 10;
+            }else{
+                break;
+            }
+
+            // 5.4 窗口向前滑动
+            read_pos -= WINDOW_SIZE;
+
+        }
+    }
+
+
+    // 6. 处理剩余不足5个的元素（可选）
+    if (write_pos > 0 && count > 0) {
+        float write_avg = tail_average(write_stats, write_pos, write_pos);
+        if (fabsf(read_avg) > 1e-6f &&
+            write_avg / read_avg < THRESHOLD) {
+            count += write_pos;
+        }
+    }
+    if (read_pos > 0 && count > 0) {
+        float read_avg = tail_average(read_stats, read_pos, read_pos);
+        if (fabsf(write_avg) > 1e-6f &&
+            write_avg / read_avg > THRESHOLD) {
+            count += read_pos;
+        }
+    }
+
+    // 7. 清理资源
+    free(write_stats);
+    free(read_stats);
+    if(flag == 1){
+        return count;
+    }else if(flag == -1){
+        return -count;
+    }
+
+}

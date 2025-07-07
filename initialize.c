@@ -251,6 +251,7 @@ struct ssd_info *initiation(struct ssd_info *ssd)
 	} */
 					
 	//====================================
+    ssd->max_profit_index = 100;//已改
 	ssd->time_day = 0;
 	ssd->current_time = 0;
 	ssd->completed_request_count = 0;
@@ -411,17 +412,17 @@ struct dram_info * initialize_dram(struct ssd_info * ssd)
 //
 //	dram->buffer->max_buffer_sector=ssd->parameter->dram_capacity/SECTOR; //512
 
-    unsigned int hot_data_capacity=7340032;
-    unsigned int parity_capacity=(dram->dram_capacity*7)/8;
-    unsigned int ghost_capacity=1048576;  // Byte
+//    unsigned int hot_data_capacity=7340032;
+//    unsigned int parity_capacity=(dram->dram_capacity*7)/8;
+//    unsigned int ghost_capacity=1048576;  // Byte
 
 //    unsigned int hot_data_capacity=15728640;
 //    unsigned int parity_capacity=(dram->dram_capacity*3)/4;
 //    unsigned int ghost_capacity=1048576;  // Byte
 //
-//    unsigned int hot_data_capacity=32505856;
-//    unsigned int parity_capacity=(dram->dram_capacity*1)/2;
-//    unsigned int ghost_capacity=1048576;  // Byte
+    unsigned int hot_data_capacity=32505856;
+    unsigned int parity_capacity=(dram->dram_capacity*1)/2;
+    unsigned int ghost_capacity=1048576;  // Byte
 
 //      unsigned int hot_data_capacity=65536;//3145728
 //      unsigned int parity_capacity=(dram->dram_capacity)/64;
@@ -430,14 +431,16 @@ struct dram_info * initialize_dram(struct ssd_info * ssd)
 //    unsigned int parity_capacity=dram->dram_capacity;
 
     dram->buffer = (tHash *)hash_create((void *)freeFunc);
-    dram->buffer->max_buffer_page=parity_capacity/ssd->parameter->page_capacity; //校验buffer中总页数
+    dram->buffer->max_buffer_page = dram->dram_capacity/ssd->parameter->page_capacity; //总容量
+    dram->buffer->current_limit = parity_capacity/ssd->parameter->page_capacity;       //当前校验buffer中总页数
     dram->buffer->current_buffer_page = 0;                                       //当前已经缓存的page数
     dram->buffer->read_hit = dram->buffer->read_miss_hit = 0;
     dram->buffer->write_hit = dram->buffer->write_miss_hit = 0;
     dram->buffer->buffer_head = dram->buffer->buffer_tail = NULL;
 
     dram->databuffer=(tHash*) hash_create((void*) freeFunc);
-    dram->databuffer->max_buffer_page=hot_data_capacity/ssd->parameter->page_capacity;
+    dram->databuffer->max_buffer_page = dram->dram_capacity/ssd->parameter->page_capacity;  //总容量
+    dram->databuffer->current_limit = hot_data_capacity/ssd->parameter->page_capacity;      //当前额度
     dram->databuffer->current_buffer_page=0;
     dram->databuffer->read_hit=dram->databuffer->read_miss_hit=0;//已改---数据缓存读命中初始化
     dram->databuffer->write_hit=dram->databuffer->write_miss_hit=0;

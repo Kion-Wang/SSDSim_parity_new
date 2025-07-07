@@ -50,4 +50,11 @@ void create_parity(struct ssd_info *ssd, struct request *req,long long raidID);
 void ppc_cache(struct ssd_info* ssd, int lpn, unsigned int state, struct request* req, unsigned int mask, unsigned long long userlpn, struct sub_request *presub);
 void gc_eject(struct ssd_info* ssd, unsigned long long raidid);
 void movtiavate(struct ssd_info* ssd, struct buffer_group *buffer_node);
+int compare_desc(const void* a, const void* b);
+int countNodes(struct buffer_group* head);
+void get_statistic(struct ssd_info* ssd,int* write_stats, int* read_stats, int size_in_write,int size_in_read);
+int optimize_cache_allocation(struct ssd_info* ssd);
+void Evict_one_node(struct ssd_info* ssd, struct buffer_info_Hash* buffer);
+float tail_average(int* arr, int size, int n);
+int compare_cache_sliding(struct ssd_info* ssd);
 #endif

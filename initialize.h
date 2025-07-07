@@ -33,7 +33,7 @@ typedef struct _HASH_NODE_
     struct _HASH_NODE_ *next;
 }HASH_NODE;
 
-
+#define CAPACITY_IN_PAGES 8064
 #define SECTOR 512
 #define BUFSIZE 200
 
@@ -235,6 +235,7 @@ struct RaidInfo{
 
 
 struct ssd_info{
+    int max_profit_index;                   //记录分给读或写缓存多少个节点空间
     long long int write_sub_countall;
     long long int read_req_countAll;      //所有channel上当写请求到达时读请求数的总和
      long long int read_req_count[16];     //统计每一个channel上当写请求到达时的读请求数--16个
@@ -910,6 +911,7 @@ struct entry{
 	unsigned int state;             //十六进制表示的话是0000-FFFF，每位表示相应的子页是否有效（页映射）。比如在这个页中，0，1号子页有效，2，3无效，这个应该是0x0003.//宋：state表示这个逻辑页中，有效子页的位置
 	long long oldppa;
     int flag;
+    int flag_ac;                    //判断ghost访问次数是否继承到读缓存
 
 };
 

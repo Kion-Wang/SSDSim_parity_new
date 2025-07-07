@@ -32,7 +32,7 @@ int hash_add(tHash *pHash ,  HASH_NODE *pInsertNode){
 		return 0;
 
 	if(pHash->nodeArray == NULL){
-		unsigned long long hash_len = ((pHash->max_buffer_page + HASH_CELL_NUM - 1) / HASH_CELL_NUM);
+		unsigned long long hash_len = ((pHash->max_buffer_page + HASH_CELL_NUM - 1) / HASH_CELL_NUM);//向上取整--确保所有缓存页都能被正确处理
 		pHash->nodeArray = malloc(sizeof(HASH_NODE) * hash_len);
 		alloc_assert(pHash->nodeArray, "pHash->nodeArray");		
 		for(; i < hash_len; ++i){
@@ -45,7 +45,7 @@ int hash_add(tHash *pHash ,  HASH_NODE *pInsertNode){
 	i = node->group % pHash->max_buffer_page;//计算哈希索引
 	i = i / 3;//分散哈希冲突
 
-	pInsertNode->next = pHash->nodeArray[i];
+	pInsertNode->next = pHash->nodeArray[i];    //头插法
 	pHash->nodeArray[i] = pInsertNode;
 	
 	pHash->count++;
@@ -62,9 +62,9 @@ HASH_NODE *hash_find(tHash *pHash, HASH_NODE *pKeyNode){
 	unsigned int target = node->group;
 	HASH_NODE *preNode = NULL;
 		
-	pos = node->group % pHash->max_buffer_page;
-	pos /= 3;
-	interNode = pHash->nodeArray[pos];
+	pos = node->group % pHash->max_buffer_page; //max变了，导致pos越界，从而导致访问非法内存---段错误
+	pos /= 3;                                   //算具体落在哪个桶内
+	interNode = pHash->nodeArray[pos];          //再从这个桶的头部开始查找
 	
 	while(interNode){
 		node = (buf_node*)interNode;

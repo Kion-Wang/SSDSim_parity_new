@@ -97,6 +97,9 @@ int find_node_READ(struct ssd_info *ssd, unsigned int lpn, struct request *req) 
     }else{
         if((buffer_node_d->stored & offset) == offset)//读-全命中---提到head
         {
+            if(ssd->dram->map->map_entry[lpn].flag_ac == 1){    //继承ghost的命中次数
+                buffer_node_d->access_Count++;
+            }
             buffer_node_d->access_Count++;//读缓存结点命中
             ssd->readHit++;
             Set_First(ssd->dram->databuffer, buffer_node_d);
@@ -106,7 +109,7 @@ int find_node_READ(struct ssd_info *ssd, unsigned int lpn, struct request *req) 
         {
             ssd->readNotHit++;
             ssd->dram->map->map_entry[lpn].flag = 0;//插入到数据缓存
-            return -1; //表示未命中
+            return -2; //表示未命中
         }
     }
 
@@ -120,7 +123,7 @@ int find_node_ghost(struct ssd_info *ssd, unsigned int lpn, struct request *req)
     key.group = lpn;
     buffer_node = (struct buffer_group *) hash_find(ssd->dram->ghostbuffer, (HASH_NODE *) &key);
     if (buffer_node == NULL) {
-        if (ssd->dram->databuffer->current_buffer_page < ssd->dram->databuffer->max_buffer_page){//最开始读缓存未满，需利用起来
+        if (ssd->dram->databuffer->current_buffer_page < ssd->dram->databuffer->current_limit){//最开始读缓存未满，需利用起来
             ssd->dram->map->map_entry[lpn].flag = -2;//插入到数据缓存和ghost
             return -1;
         }else{
@@ -128,8 +131,10 @@ int find_node_ghost(struct ssd_info *ssd, unsigned int lpn, struct request *req)
             return -1;
         }
     } else {
+        //buffer_node->access_Count++;
         Set_First(ssd->dram->ghostbuffer, buffer_node);
         ssd->dram->map->map_entry[lpn].flag = 0;//插入到数据缓存
+        ssd->dram->map->map_entry[lpn].flag_ac = 1;
         return -1;
     }
 
@@ -180,7 +185,7 @@ struct ssd_info *insert2buffer(struct ssd_info *ssd, unsigned int lpn, struct su
         temp->access_Count++;
         return ssd;   //针对读部分命中---更新状态+置为队头---完毕后返回
     }
-    if (ssd->dram->databuffer->current_buffer_page >= ssd->dram->databuffer->max_buffer_page) {
+    if (ssd->dram->databuffer->current_buffer_page >= ssd->dram->databuffer->current_limit) {
         if (ssd->parameter->subpage_page == 32) {
             mask = 0xffffffff;
         } else {
@@ -246,7 +251,7 @@ struct ssd_info *insert2buffer(struct ssd_info *ssd, unsigned int lpn, struct su
     memset(new_node, 0, sizeof(struct buffer_group));
 
     new_node->group = lpn;//把该lpn设置为缓存新节点
-    new_node->access_Count = 1;
+    new_node->access_Count = 0;     //第一次进缓存访问次数为0
     if (req->operation == READ) {
         new_node->stored = sub->state;//什么意思？
     } else {

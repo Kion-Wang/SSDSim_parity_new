@@ -17,6 +17,7 @@ typedef struct buffer_info_Hash {
     struct buffer_group *buffer_head;            /*as LRU head which is most recently used*/
     struct buffer_group *buffer_tail;            /*as LRU tail which is least recently used*/
     struct _HASH_NODE_ **nodeArray;
+    unsigned int current_limit;
     unsigned int max_buffer_page;
     unsigned int current_buffer_page;
 
