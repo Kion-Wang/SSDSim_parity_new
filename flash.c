@@ -241,7 +241,8 @@ Status allocate_location(struct ssd_info *ssd, struct sub_request *sub_req) {
 //                    {
 //                        printf("check->stripe: %d,%d,%d,%d,%d\n", ssd->stripe.nowStripe, sub_req->location->channel,
 //                               sub_req->location->chip, sub_req->location->die, sub_req->location->plane);
-//                    } else if (ssd->dram->map->map_entry[sub_req->lpn].state == 0) {
+//                    }
+                    //else if (ssd->dram->map->map_entry[sub_req->lpn].state == 0) {
 //                        printf("data->stripe: %d,%d,%d,%d,%d\n", ssd->stripe.nowStripe, sub_req->location->channel,
 //                               sub_req->location->chip, sub_req->location->die, sub_req->location->plane);
 //                    }
@@ -1025,7 +1026,8 @@ creat_sub_request(struct ssd_info *ssd, unsigned int lpn, int size, unsigned int
                                                        ssd->chanSubWLenNow[sub->location->channel]);
         ++ssd->chanSubCount[sub->location->channel];
 
-//        if(lpn != ssd->stripe.checkLpn){
+        if(lpn != ssd->stripe.checkLpn){
+            ssd->write_sub_countall++;
             Rhead = ssd->channel_head[sub->location->channel].subs_r_head;
 
             while (Rhead != NULL) {
@@ -1035,7 +1037,7 @@ creat_sub_request(struct ssd_info *ssd, unsigned int lpn, int size, unsigned int
             ssd->read_req_countAll += ssd->read_req_count[sub->location->channel];//已改
             ssd->read_req_count[sub->location->channel] = 0;
 
-//        }
+        }
 
 
     } else {

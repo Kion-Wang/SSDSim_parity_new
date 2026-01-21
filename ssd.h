@@ -57,4 +57,6 @@ int optimize_cache_allocation(struct ssd_info* ssd);
 void Evict_one_node(struct ssd_info* ssd, struct buffer_info_Hash* buffer);
 float tail_average(int* arr, int size, int n);
 int compare_cache_sliding(struct ssd_info* ssd);
+struct ssd_info *insert2readghostbuffer(struct ssd_info *ssd, unsigned int lpn, unsigned int state);
+struct ssd_info *insert2parityghostbuffer(struct ssd_info *ssd, unsigned int lpn, unsigned int state);
 #endif

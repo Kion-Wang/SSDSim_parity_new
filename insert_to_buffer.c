@@ -6,6 +6,7 @@
 //
 
 #include "insert_to_buffer.h"
+#include "ssd.h"
 
 struct ssd_info *buffer_management(struct ssd_info *ssd)//----ver1:lpnFlag
 {
@@ -99,6 +100,7 @@ int find_node_READ(struct ssd_info *ssd, unsigned int lpn, struct request *req) 
         {
             if(ssd->dram->map->map_entry[lpn].flag_ac == 1){    //继承ghost的命中次数
                 buffer_node_d->access_Count++;
+                ssd->dram->map->map_entry[lpn].flag_ac = 0; // 清掉，避免永久加成
             }
             buffer_node_d->access_Count++;//读缓存结点命中
             ssd->readHit++;
@@ -180,6 +182,10 @@ struct ssd_info *insert2buffer(struct ssd_info *ssd, unsigned int lpn, struct su
     key.group = lpn;
     temp = (struct buffer_group *) hash_find(ssd->dram->databuffer, (HASH_NODE *) &key);
     if (temp != NULL) { //---针对读部分命中:更新状态，并提到队头
+        //命中插入路径
+        if (req->operation == READ) {
+            insert2readghostbuffer(ssd, lpn, sub->state);
+        }
         temp->stored = temp->stored | sub->state;
         Set_First(ssd->dram->databuffer, temp);
         temp->access_Count++;
@@ -251,7 +257,7 @@ struct ssd_info *insert2buffer(struct ssd_info *ssd, unsigned int lpn, struct su
     memset(new_node, 0, sizeof(struct buffer_group));
 
     new_node->group = lpn;//把该lpn设置为缓存新节点
-    new_node->access_Count = 0;     //第一次进缓存访问次数为0
+    new_node->access_Count = 1;     //第一次进缓存访问次数为0
     if (req->operation == READ) {
         new_node->stored = sub->state;//什么意思？
     } else {
@@ -274,10 +280,16 @@ struct ssd_info *insert2buffer(struct ssd_info *ssd, unsigned int lpn, struct su
     }
     hash_add(ssd->dram->databuffer, (HASH_NODE *) new_node);
     ssd->dram->databuffer->current_buffer_page++;
+
+    //miss插入路径
+    if (req->operation == READ) {
+        insert2readghostbuffer(ssd, lpn, sub->state);
+    }
+
     return ssd;
 }
 
-struct ssd_info *insert2ghost(struct ssd_info *ssd, unsigned int lpn, struct sub_request *sub, struct request *req) {
+struct ssd_info *insert2ghost_old(struct ssd_info *ssd, unsigned int lpn, struct sub_request *sub, struct request *req) {
     struct buffer_group *buffer_node, *new_node, *temp, key;
     unsigned int sub_req_state = 0, sub_req_size = 0, sub_req_lpn = 0;
     unsigned int last_lpn, first_lpn, state;
@@ -359,6 +371,7 @@ struct ssd_info *insert2ghost(struct ssd_info *ssd, unsigned int lpn, struct sub
     memset(new_node, 0, sizeof(struct buffer_group));
 
     new_node->group = lpn;//把该lpn设置为缓存新节点
+    new_node->access_Count = 1;
     if (req->operation == READ) {
         new_node->stored = sub->state;//什么意思？
     } else {
@@ -379,6 +392,99 @@ struct ssd_info *insert2ghost(struct ssd_info *ssd, unsigned int lpn, struct sub
         ssd->dram->ghostbuffer->buffer_head = new_node;
     }
     hash_add(ssd->dram->ghostbuffer, (HASH_NODE *) new_node);
+    ssd->dram->ghostbuffer->current_buffer_page++;
+    return ssd;
+}
+
+struct ssd_info *insert2ghost(struct ssd_info *ssd, unsigned int lpn, struct sub_request *sub, struct request *req) {
+    struct buffer_group *buffer_node, *new_node, *temp, key;
+    unsigned int sub_req_state = 0, sub_req_size = 0, sub_req_lpn = 0;
+    unsigned int last_lpn, first_lpn, state;
+    struct sub_request *sub1 = NULL;
+    unsigned int mask = 0;
+    unsigned int offset1 = 0, offset2 = 0;
+
+
+    key.group = lpn;
+    temp = (struct buffer_group *)hash_find(ssd->dram->ghostbuffer, (HASH_NODE *)&key);
+    if (temp != NULL) { // 命中：更新状态 + 提到队头
+        if (req->operation == READ) {
+            temp->stored = temp->stored | sub->state;
+        } else { // WRITE 命中：保持与 miss 插入一致，用 get_offset()
+            temp->stored = temp->stored | get_offset(ssd, req, lpn);
+            temp->dirty_clean = temp->dirty_clean | get_offset(ssd, req, lpn);
+        }
+
+        Set_First(ssd->dram->ghostbuffer, temp);
+        temp->access_Count++;
+        return ssd;
+    }
+
+    if (ssd->dram->ghostbuffer->current_buffer_page >= ssd->dram->ghostbuffer->max_buffer_page) {
+        buffer_node = ssd->dram->ghostbuffer->buffer_tail;
+
+        if (buffer_node != NULL) {
+            /* 安全淘汰：处理“只有一个结点”和“一般情况”，并维护 head/tail */
+            if (ssd->dram->ghostbuffer->buffer_head == buffer_node &&
+                ssd->dram->ghostbuffer->buffer_tail == buffer_node) {
+                /* 只有一个结点 */
+                ssd->dram->ghostbuffer->buffer_head = NULL;
+                ssd->dram->ghostbuffer->buffer_tail = NULL;
+            } else {
+                /* 多个结点：从尾部摘除 */
+                ssd->dram->ghostbuffer->buffer_tail = buffer_node->LRU_link_pre;
+                if (ssd->dram->ghostbuffer->buffer_tail != NULL) {
+                    ssd->dram->ghostbuffer->buffer_tail->LRU_link_next = NULL;
+                }
+                /* 防御性：如果尾结点同时等于头（理论上不该发生，但防链表损坏） */
+                if (ssd->dram->ghostbuffer->buffer_head == buffer_node) {
+                    ssd->dram->ghostbuffer->buffer_head = buffer_node->LRU_link_next;
+                    if (ssd->dram->ghostbuffer->buffer_head != NULL) {
+                        ssd->dram->ghostbuffer->buffer_head->LRU_link_pre = NULL;
+                    }
+                }
+            }
+
+            ssd->dram->ghostbuffer->current_buffer_page--;
+            buffer_node->LRU_link_pre = buffer_node->LRU_link_next = NULL;
+            hash_del(ssd->dram->ghostbuffer, (HASH_NODE *)buffer_node);
+            hash_node_free(ssd->dram->ghostbuffer, (HASH_NODE *)buffer_node);
+            buffer_node = NULL;
+        }
+    }
+
+    new_node = NULL;
+    new_node = (struct buffer_group *)malloc(sizeof(struct buffer_group));
+    alloc_assert(new_node, "buffer_group_node");
+    memset(new_node, 0, sizeof(struct buffer_group));
+
+    new_node->group = lpn; // 把该lpn设置为缓存新节点
+    new_node->access_Count = 1;
+
+    if (req->operation == READ) {
+        new_node->stored = sub->state;
+    } else {
+        new_node->stored = get_offset(ssd, req, lpn); // 判断扇区是不是在请求里面
+    }
+
+    if (req->operation == WRITE) {
+        new_node->dirty_clean = new_node->stored;
+    } else {
+        new_node->dirty_clean = 0;
+    }
+
+    new_node->LRU_link_pre = NULL;
+    new_node->LRU_link_next = NULL;
+
+    if (ssd->dram->ghostbuffer->buffer_head == NULL) {
+        ssd->dram->ghostbuffer->buffer_head = ssd->dram->ghostbuffer->buffer_tail = new_node;
+    } else {
+        new_node->LRU_link_next = ssd->dram->ghostbuffer->buffer_head;
+        ssd->dram->ghostbuffer->buffer_head->LRU_link_pre = new_node;
+        ssd->dram->ghostbuffer->buffer_head = new_node;
+    }
+
+    hash_add(ssd->dram->ghostbuffer, (HASH_NODE *)new_node);
     ssd->dram->ghostbuffer->current_buffer_page++;
     return ssd;
 }

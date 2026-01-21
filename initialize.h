@@ -235,6 +235,8 @@ struct RaidInfo{
 
 
 struct ssd_info{
+    unsigned long last_opt_completed;           //保证窗口“每个边界只执行一次”
+    int target_valid ;                      //是否进行第一次优化标志位
     int max_profit_index;                   //记录分给读或写缓存多少个节点空间
     long long int write_sub_countall;
     long long int read_req_countAll;      //所有channel上当写请求到达时读请求数的总和
@@ -336,6 +338,7 @@ struct ssd_info{
 	char outputfilename[30];
 	char statisticfilename[30];
 	char statisticfilename2[30];
+    char latencyfilename[30];
 
 	FILE * raidOutfile;
 	FILE * gcCreateRequest;
@@ -347,6 +350,8 @@ struct ssd_info{
 	FILE * motivateFile;
     FILE * aCountParityfile;
     FILE * aCountDatafile;
+
+    FILE * latencyfile;
 
 
     struct parameter_value *parameter;   //SSD��������
@@ -681,6 +686,10 @@ struct dram_info{
 	struct buffer_info_Hash *buffer;
     struct buffer_info_Hash *databuffer;
     struct buffer_info_Hash *ghostbuffer;
+
+    struct buffer_info_Hash *ghostbuffer_parity;
+    struct buffer_info_Hash *ghostbuffer_read;
+
 };
 
 

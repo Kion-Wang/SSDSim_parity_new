@@ -143,6 +143,13 @@ struct ssd_info *initiation(struct ssd_info *ssd)
     strcat(full_path, ssd->statisticfilename);
     strcpy(ssd->statisticfilename, full_path);
 
+    strncpy(ssd->latencyfilename,tracename,30);
+    strcat(ssd->latencyfilename,".csv");
+    char full_path_lat[100] = "./latency/";
+    strcat(full_path_lat,ssd->latencyfilename);
+    strcpy(ssd->latencyfilename,full_path_lat);
+
+
 
 
     //����ssd�������ļ�
@@ -251,6 +258,7 @@ struct ssd_info *initiation(struct ssd_info *ssd)
 	} */
 					
 	//====================================
+    ssd->target_valid = 0;
     ssd->max_profit_index = 100;//已改
 	ssd->time_day = 0;
 	ssd->current_time = 0;
@@ -332,6 +340,12 @@ struct ssd_info *initiation(struct ssd_info *ssd)
 		ssd->UBT[i] = 0;
 		//printf("%d\n", ssd->BET[i]);
 	} */
+    printf("\n");
+    ssd->latencyfile=fopen(ssd->latencyfilename,"w");
+    if(ssd->latencyfile == NULL){
+        printf("the latency file can't open\n");
+        return NULL;
+    }
 
 	printf("\n");
 	ssd->outputfile=fopen(ssd->outputfilename,"w");
@@ -412,6 +426,12 @@ struct dram_info * initialize_dram(struct ssd_info * ssd)
 //
 //	dram->buffer->max_buffer_sector=ssd->parameter->dram_capacity/SECTOR; //512
 
+//
+        unsigned int hot_data_capacity=3145728;
+        unsigned int parity_capacity=(dram->dram_capacity*15)/16;
+        unsigned int ghost_capacity=1048576;  // Byte
+
+
 //    unsigned int hot_data_capacity=7340032;
 //    unsigned int parity_capacity=(dram->dram_capacity*7)/8;
 //    unsigned int ghost_capacity=1048576;  // Byte
@@ -419,14 +439,14 @@ struct dram_info * initialize_dram(struct ssd_info * ssd)
 //    unsigned int hot_data_capacity=15728640;
 //    unsigned int parity_capacity=(dram->dram_capacity*3)/4;
 //    unsigned int ghost_capacity=1048576;  // Byte
-//
-    unsigned int hot_data_capacity=32505856;
-    unsigned int parity_capacity=(dram->dram_capacity*1)/2;
-    unsigned int ghost_capacity=1048576;  // Byte
+////
+//    unsigned int hot_data_capacity=32505856;
+//    unsigned int parity_capacity=(dram->dram_capacity*1)/2;
+//    unsigned int ghost_capacity=1048576;  // Byte
 
-//      unsigned int hot_data_capacity=65536;//3145728
-//      unsigned int parity_capacity=(dram->dram_capacity)/64;
-//      unsigned int ghost_capacity=1024;  // Byte
+//      unsigned int hot_data_capacity=49283072;//3145728
+//      unsigned int parity_capacity=(dram->dram_capacity*1)/4;
+//      unsigned int ghost_capacity=1048576;  // Byte
 
 //    unsigned int parity_capacity=dram->dram_capacity;
 
@@ -453,7 +473,16 @@ struct dram_info * initialize_dram(struct ssd_info * ssd)
     dram->ghostbuffer->write_hit=dram->ghostbuffer->write_miss_hit=0;
     dram->ghostbuffer->buffer_head=dram->ghostbuffer->buffer_tail=NULL;
 
+    //设置两个ghostbuffer;
+    dram->ghostbuffer_parity=(tHash*) hash_create((void*) freeFunc);
+    dram->ghostbuffer_parity->max_buffer_page=8064;
+    dram->ghostbuffer_parity->current_buffer_page=0;
+    dram->ghostbuffer_parity->buffer_head=dram->ghostbuffer_parity->buffer_tail=NULL;
 
+    dram->ghostbuffer_read=(tHash*) hash_create((void*) freeFunc);
+    dram->ghostbuffer_read->max_buffer_page=8064;
+    dram->ghostbuffer_read->current_buffer_page=0;
+    dram->ghostbuffer_read->buffer_head=dram->ghostbuffer_read->buffer_tail=NULL;
 
 
     dram->map = (struct map_info *)malloc(sizeof(struct map_info));

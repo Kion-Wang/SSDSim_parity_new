@@ -341,8 +341,17 @@ void raid_pre_read(struct ssd_info *ssd, unsigned int lsn, unsigned int lpn, uns
 	unsigned int ppn;
 	struct local *location;
 
-	ppn=get_ppn_for_pre_process(ssd,lsn);                  
+	ppn=get_ppn_for_pre_process(ssd,lsn);
 	location=find_location(ssd,ppn);
+//    if (lpn == ssd->stripe.checkLpn)//已改
+//        {
+//            printf("check->stripe: %d,%d,%d,%d,%d\n", ssd->stripe.nowStripe, location->channel, location->chip, location->die ,location->plane);
+//        }
+//        else
+//        {
+//            printf("data->stripe: %d,%d,%d,%d,%d\n", ssd->stripe.nowStripe, location->channel, location->chip, location->die,location->plane );
+//        }
+
 	ssd->program_count++;	
 	ssd->channel_head[location->channel].program_count++;
 	ssd->channel_head[location->channel].chip_head[location->chip].program_count++;		
@@ -380,7 +389,7 @@ void init_ppc_cache(struct ssd_info *ssd){
 					ssd->ssdToken = 0;
 					if(++ssd->channelToken >= ssd->perChanSSD){
 						ssd->channelToken = 0;
-						if(++ssd->chipToken >= ssd->parameter->chip_channel[0])
+						if(+0+ssd->chipToken >= ssd->parameter->chip_channel[0])
 							ssd->chipToken = 0;
 					}
 				}
@@ -633,6 +642,9 @@ struct ssd_info *pre_process_page_raid(struct ssd_info *ssd)
 					*�������get_ppn_for_pre_process�������ppn���ٵõ�location
 					*�޸�ssd����ز�����dram��ӳ���map���Լ�location�µ�page��״̬
 					***************************************************************/
+                    if(lpn == 3333817){
+                        printf("find it !\n");
+                    }
 					ssd->stripe.req[ssd->stripe.now].lpn = lpn;
 					ssd->stripe.req[ssd->stripe.now].state = full_page;				
 					ssd->stripe.req[ssd->stripe.now].req = ssd->raidReq;
@@ -806,6 +818,7 @@ unsigned int get_ppn_for_pre_process(struct ssd_info *ssd,unsigned int lsn)
                     }
                 }
             }
+
 
 		}
 	}
