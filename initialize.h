@@ -486,6 +486,11 @@ struct ssd_info{
 
 	unsigned long long changeCount[3];
 
+    unsigned long long ppc_lookup;
+    unsigned long long ppc_full_hit1;
+    unsigned long long ppc_partial_hit1;
+    unsigned long long ppc_full_hit;
+    unsigned long long ppc_partial_hit;
 	unsigned long long cacheHit;      //校验位缓存命中数
 	unsigned long long cachedoNotHit; //校验位缓存未命中数
 	unsigned long long cacheCount;

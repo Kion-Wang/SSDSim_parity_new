@@ -579,7 +579,7 @@ static void window_opt_hook(struct ssd_info *ssd)
 
     /* 3) 最小配额 ---分到什么时候不分 */
     int MIN_W = CAP / 10;
-    int MIN_R = CAP / 10;
+    int MIN_R = 1;
 
     /* 4) 迁移速率：每窗口最多迁移 MAX_STEP 页 */
 //    int MAX_STEP = CAP / 50;   /* ~160 when CAP=8064 */
@@ -3017,8 +3017,10 @@ void statistic_output(struct ssd_info *ssd) {
     fprintf(ssd->statisticfile, "\n");
     fprintf(ssd->statisticfile, "ssd->cacheFail %lld\n", ssd->cacheFail);
     fprintf(ssd->statisticfile, "ssd->cacheFailAll %lld\n", ssd->cacheFailAll);
-    fprintf(ssd->statisticfile, "use efficency %f\n",
-            (double) ssd->cacheHit / ((double) (ssd->cachedoNotHit + ssd->cacheHit)));
+    fprintf(ssd->statisticfile,"lookup=%llu node_hit=%llu miss=%llu full=%llu partial=%llu   full1=%llu   partial=%llu\n", ssd->ppc_lookup, ssd->cacheHit, ssd->cachedoNotHit,
+            ssd->ppc_full_hit, ssd->ppc_partial_hit,ssd->ppc_full_hit1,ssd->ppc_partial_hit1);
+    fprintf(ssd->statisticfile,"use efficency %f\n",(double)ssd->cacheHit/((double)(ssd->cachedoNotHit + ssd->cacheHit)));
+    fprintf(ssd->statisticfile,"use efficency_full %f\n",(double)ssd->ppc_full_hit/((double)(ssd->ppc_partial_hit + ssd->ppc_full_hit + ssd->cachedoNotHit)));
     fprintf(ssd->statisticfile, "use efficency_readbuffer %f\n",
             (double) ssd->readHit / ((double) (ssd->readHit + ssd->readNotHit)));
     fprintf(ssd->statisticfile, "ssd->read_req_countAll_for_avg_write %.2f\n",
@@ -3840,10 +3842,24 @@ void ppc_cache(struct ssd_info *ssd, int lpn, unsigned int state, struct request
         printf(" raid %d\n", lpn);
         abort();
     }
+    ssd->ppc_lookup++;//parity cache 总查询次数
+
     /* === 新增：parity ghost 插入 === */
     insert2parityghostbuffer(ssd, lpn, state);
 
     if ((buffer_node = (struct buffer_group *) hash_find(ssd->dram->buffer, (HASH_NODE *) &key)) != NULL) {
+        // ★只在 state != 0 时才判断 full / partial
+        if (state != 0) {
+            if ((buffer_node->stored & state) == state)
+                ssd->ppc_full_hit++;
+            else
+                ssd->ppc_partial_hit++;
+        }
+        if ((buffer_node->stored & state) == state)
+            ssd->ppc_full_hit1++;
+        else
+            ssd->ppc_partial_hit1++;
+
         if (ssd->dram->buffer->buffer_head != buffer_node) {
             movtiavate(ssd, buffer_node);
             move_to_head(ssd, buffer_node);
