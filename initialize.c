@@ -64,6 +64,28 @@ extern int freeFunc(HASH_NODE *pNode)
 }
 
 
+static void borrow_stat_init(struct ssd_info *ssd)
+{
+    if (!ssd) return;
+
+    ssd->borrow_base_inited = 0;
+    ssd->parity_base_limit  = 0;
+
+    /* 文件名你可以按 workload / 参数拼接，这里先给最简单的 */
+    ssd->borrowfile = fopen(ssd->borrowfilename, "w");
+    if (!ssd->borrowfile) {
+        printf("the borrow file can't open\n");
+        return ;
+    }
+
+    /* 写表头（你在 window_opt_hook 里也写表头也行，但写两次会重复）
+       推荐：统一在 init 写一次 */
+    fprintf(ssd->borrowfile,
+            "completed,win,phase,cur_parity,cur_read,cap,parity_pct,borrow_out,borrow_ratio\n");
+    fflush(ssd->borrowfile);
+}
+
+
 /**********   initiation   ******************
 *modify by zhouwen
 *November 08,2011
@@ -148,6 +170,25 @@ struct ssd_info *initiation(struct ssd_info *ssd)
     char full_path_lat[100] = "./latency/";
     strcat(full_path_lat,ssd->latencyfilename);
     strcpy(ssd->latencyfilename,full_path_lat);
+
+    strncpy(ssd->borrowfilename,tracename,30);
+    strcat(ssd->borrowfilename,".csv");
+    char full_path_borrow[100] = "./borrow/";
+    strcat(full_path_borrow,ssd->borrowfilename);
+    strcpy(ssd->borrowfilename,full_path_borrow);
+
+    strncpy(ssd->sensefilename,tracename,30);
+    strcat(ssd->sensefilename,".csv");
+    char full_path_sense[100] = "./sense/";
+    strcat(full_path_sense,ssd->sensefilename);
+    strcpy(ssd->sensefilename,full_path_sense);
+
+    strncpy(ssd->queuefilename,tracename,30);
+    strcat(ssd->queuefilename,".csv");
+    char full_path_queue[100] = "./queue/";
+    strcat(full_path_queue,ssd->queuefilename);
+    strcpy(ssd->queuefilename,full_path_queue);
+
 
 
 
@@ -258,6 +299,26 @@ struct ssd_info *initiation(struct ssd_info *ssd)
 	} */
 					
 	//====================================
+    ssd->step_div = 100;   // 默认 1%（你扫参时改成 200/100/50/20）
+//    ssd->step_div = 200;   //0.5%
+//    ssd->step_div = 50;    //2%
+//    ssd->step_div = 20;     //5%
+
+    ssd->last_window_inited = 0;
+    ssd->last_window_parity = 0;
+    ssd->deltaP_sum = 0;
+    ssd->deltaP_max = 0;
+    ssd->deltaP_cnt = 0;
+
+    ssd->conv_inited = 0;
+    ssd->conv_win = -1;
+    ssd->conv_streak = 0;
+
+    ssd->sensefile = NULL;
+
+
+    ssd->ema_inited = 0;
+    ssd->ema_target_w = 0.0;//Modify--window_opt
     ssd->target_valid = 0;
     ssd->max_profit_index = 100;//已改
 	ssd->time_day = 0;
@@ -340,6 +401,30 @@ struct ssd_info *initiation(struct ssd_info *ssd)
 		ssd->UBT[i] = 0;
 		//printf("%d\n", ssd->BET[i]);
 	} */
+    ssd->queuefile = fopen(ssd->queuefilename, "w");
+    if(ssd->queuefile == NULL){
+        printf("the queue file can't open\n");
+        return NULL;
+    }
+
+
+    printf("\n");
+    ssd->sensefile = fopen(ssd->sensefilename, "w");
+    if(ssd->sensefile == NULL){
+        printf("the sense file can't open\n");
+        return NULL;
+    }
+    if (ssd->sensefile) {
+        fprintf(ssd->sensefile,
+                "req,win,step_div,phase,P_cur,R_cur,CAP,target_raw,target_ema,H,abs_err,moved,deltaP,mean_deltaP_sofar,max_deltaP_sofar,conv_win\n");
+        fflush(ssd->sensefile);
+    }
+
+
+    printf("\n");
+    borrow_stat_init(ssd);//modify---borrow_cache
+
+
     printf("\n");
     ssd->latencyfile=fopen(ssd->latencyfilename,"w");
     if(ssd->latencyfile == NULL){

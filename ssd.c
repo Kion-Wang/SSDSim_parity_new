@@ -531,11 +531,154 @@ void Evict_one_node(struct ssd_info *ssd, struct buffer_info_Hash *buffer) {//�
 //    buffer_node = NULL;
 //}
 
-static void window_opt_hook(struct ssd_info *ssd)
-{
+//static void window_opt_hook(struct ssd_info *ssd)
+//{
+////    int cur_w = (int)ssd->dram->buffer->current_limit;
+////    int cur_r = (int)ssd->dram->databuffer->current_limit;
+//    const unsigned long WIN = 10240;
+//
+//    if (!ssd) return;
+//
+//    /* 只在完成数达到窗口边界时触发，且每个边界只触发一次 */
+//    if (ssd->completed_request_count == 0) return;
+//    if (ssd->completed_request_count % WIN != 0) return;
+//    if (ssd->completed_request_count == ssd->last_opt_completed) return;
+//
+//    ssd->last_opt_completed = ssd->completed_request_count; /* 哨兵 */
+//
+//    printf("\n=== WINDOW @ %lu ===\n", (unsigned long)ssd->completed_request_count);
+//
+//    //zsy modify
+//    int cur_parity_node_num = dump_buffer_access_stat(ssd->dram->ghostbuffer_parity->buffer_head, "PARITY");
+//    int cur_read_node_num = dump_buffer_access_stat(ssd->dram->ghostbuffer_read->buffer_head, "READ");
+//    printf("parity:%d, read:%d\n", cur_parity_node_num, cur_read_node_num);
+//
+//
+//    /* 1) 计算目标写容量 target_w (= best_j) */
+//    int target_w = optimize_cache_allocation(ssd); //两个ghostbuffer的作用到此结束
+//    if (target_w < 0) exit(-1);
+//
+//    /* 2) 当前容量（CAP固定） */
 //    int cur_w = (int)ssd->dram->buffer->current_limit;
 //    int cur_r = (int)ssd->dram->databuffer->current_limit;
-    const unsigned long WIN = 10240;
+//    int CAP   = cur_w + cur_r;
+//
+//    /* --- borrow 基准初始化（只做一次） --- */
+//    if (!ssd->borrow_base_inited) {
+//        ssd->parity_base_limit = cur_w;   // 基准：第一次窗口看到的 parity 配额
+//        ssd->borrow_base_inited = 1;
+//
+//    }
+//    /* --- 记录窗口触发时的分配（phase=0）--- */
+//    if (ssd->borrowfile) {
+//        int P_base = ssd->parity_base_limit;
+//        int P_cur  = cur_w;
+//        int borrow_out = (P_cur < P_base) ? (P_base - P_cur) : 0;
+//        double borrow_ratio = (P_base > 0) ? ((double)borrow_out / (double)P_base) : 0.0;
+//        double parity_pct   = (CAP > 0) ? ((double)P_cur / (double)CAP) : 0.0;
+//
+//        fprintf(ssd->borrowfile, "%lu,%lu,%d,%d,%d,%d,%.6f,%d,%.6f\n",
+//                (unsigned long)ssd->completed_request_count,
+//                (unsigned long)(ssd->completed_request_count / WIN),
+//                0, P_cur, cur_r, CAP, parity_pct, borrow_out, borrow_ratio);
+//        fflush(ssd->borrowfile);
+//    }
+//    printf("cur limit before split:parity %d, read %d\n",ssd->dram->buffer->current_limit, ssd->dram->databuffer->current_limit);
+//
+//    //zsy modify ,wait cache full
+////    if((cur_parity_node_num+cur_read_node_num) < CAP){
+////        return;
+////    }
+//    if (ssd->completed_request_count < 5 * WIN) return;
+//
+//
+//    /* 防御：确保 target 在 [0, CAP] */
+//    if (target_w < 0) target_w = 0;
+//    if (target_w > CAP) target_w = CAP;
+//
+//    ssd->max_profit_index = target_w;
+//
+//    printf("target_w(best_j):%d\n", target_w);
+//    printf("cur_w:%d cur_r:%d CAP:%d\n", cur_w, cur_r, CAP);
+//
+//    /* 3) 最小配额 ---分到什么时候不分 */
+//    int MIN_W = CAP / 10;
+//    int MIN_R = 364;
+//
+//    /* 4) 迁移速率：每窗口最多迁移 MAX_STEP 页 */
+////    int MAX_STEP = CAP / 50;   /* ~160 when CAP=8064 */
+////    if (MAX_STEP < 16) MAX_STEP = 16;
+//
+//    /* 5) 迟滞 + 迁移 */
+////    int H = 64;----Modify
+//    int H = CAP / 300;   // 约 26（CAP=8064）
+//    if (H < 8) H = 8;
+//
+//    int diff = target_w - cur_w;
+//    int absdiff = iabs_int(diff);
+//
+//    printf("diff target-cur_w = %d\n", diff);
+//
+//    if (absdiff >= H) {
+//        int step = absdiff;
+//       // if (step > MAX_STEP) step = MAX_STEP;
+//
+//        while (step-- > 0) {
+//            cur_w = (int)ssd->dram->buffer->current_limit;
+//
+//            if (target_w > cur_w) {
+//                /* 给写扩：从读挪 1 页到写 */
+//                if ((int)ssd->dram->databuffer->current_limit <= MIN_R) break;
+//                Evict_one_node(ssd, ssd->dram->databuffer);
+//            } else if (target_w < cur_w) {
+//                /* 给读扩：从写挪 1 页到读 */
+//                if ((int)ssd->dram->buffer->current_limit <= MIN_W) break;
+//                Evict_one_node(ssd, ssd->dram->buffer);
+//            } else {
+//                break;
+//            }
+//        }
+//        printf("cur limit after split:parity %d, read %d\n",ssd->dram->buffer->current_limit, ssd->dram->databuffer->current_limit);
+//
+//
+//        /* --- 记录调整后的分配（phase=1）--- */
+//        if (ssd->borrowfile) {
+//            int P_base = ssd->parity_base_limit;
+//            int P_cur  = (int)ssd->dram->buffer->current_limit;
+//            int R_cur  = (int)ssd->dram->databuffer->current_limit;
+//            int CAP2   = P_cur + R_cur;
+//
+//            int borrow_out = (P_cur < P_base) ? (P_base - P_cur) : 0;
+//            double borrow_ratio = (P_base > 0) ? ((double)borrow_out / (double)P_base) : 0.0;
+//            double parity_pct   = (CAP2 > 0) ? ((double)P_cur / (double)CAP2) : 0.0;
+//
+//            fprintf(ssd->borrowfile, "%lu,%lu,%d,%d,%d,%d,%.6f,%d,%.6f\n",
+//                    (unsigned long)ssd->completed_request_count,
+//                    (unsigned long)(ssd->completed_request_count / WIN),
+//                    1, P_cur, R_cur, CAP2, parity_pct, borrow_out, borrow_ratio);
+//            fflush(ssd->borrowfile);
+//        }
+//
+//    }
+//
+//    /* 6) 衰减/清零（选一个） */
+////    decay_access_count(ssd->dram->buffer->buffer_head);
+////    decay_access_count(ssd->dram->databuffer->buffer_head);
+//
+//    // 或者：清零-----指的是 reset为 1
+//    reset_access_count(ssd->dram->buffer->buffer_head);
+//    reset_access_count(ssd->dram->databuffer->buffer_head);
+//
+//}
+
+static void window_opt_hook(struct ssd_info *ssd)
+{
+    const unsigned long WIN = 4096;
+
+//    const unsigned long WIN_4K   = 4096;    // 4k
+//    const unsigned long WIN_8K   = 8192;    // 8k
+//    const unsigned long WIN_16K  = 16384;   // 16k
+//    const unsigned long WIN_32K  = 32768;   // 32k
 
     if (!ssd) return;
 
@@ -543,87 +686,215 @@ static void window_opt_hook(struct ssd_info *ssd)
     if (ssd->completed_request_count == 0) return;
     if (ssd->completed_request_count % WIN != 0) return;
     if (ssd->completed_request_count == ssd->last_opt_completed) return;
-
-    ssd->last_opt_completed = ssd->completed_request_count; /* 哨兵 */
+    ssd->last_opt_completed = ssd->completed_request_count;
 
     printf("\n=== WINDOW @ %lu ===\n", (unsigned long)ssd->completed_request_count);
 
-    //zsy modify
     int cur_parity_node_num = dump_buffer_access_stat(ssd->dram->ghostbuffer_parity->buffer_head, "PARITY");
-    int cur_read_node_num = dump_buffer_access_stat(ssd->dram->ghostbuffer_read->buffer_head, "READ");
+    int cur_read_node_num   = dump_buffer_access_stat(ssd->dram->ghostbuffer_read->buffer_head, "READ");
     printf("parity:%d, read:%d\n", cur_parity_node_num, cur_read_node_num);
 
-
-    /* 1) 计算目标写容量 target_w (= best_j) */
-    int target_w = optimize_cache_allocation(ssd); //两个ghostbuffer的作用到此结束
-    if (target_w < 0) exit(-1);
-
-    /* 2) 当前容量（CAP固定） */
+    /* 当前容量（CAP固定） */
     int cur_w = (int)ssd->dram->buffer->current_limit;
     int cur_r = (int)ssd->dram->databuffer->current_limit;
     int CAP   = cur_w + cur_r;
+    if (!ssd->borrow_base_inited) {
+        ssd->parity_base_limit = cur_w;   // 基准：第一次窗口看到的 parity 配额
+        ssd->borrow_base_inited = 1;
 
-    //zsy modify ,wait cache full
-    if((cur_parity_node_num+cur_read_node_num) < CAP){
+    }
+
+    //    /* --- 记录窗口触发时的分配（phase=0）--- */
+    if (ssd->borrowfile) {
+        int P_base = ssd->parity_base_limit;
+        int P_cur  = cur_w;
+        int borrow_out = (P_cur < P_base) ? (P_base - P_cur) : 0;
+        double borrow_ratio = (P_base > 0) ? ((double)borrow_out / (double)P_base) : 0.0;
+        double parity_pct   = (CAP > 0) ? ((double)P_cur / (double)CAP) : 0.0;
+
+        fprintf(ssd->borrowfile, "%lu,%lu,%d,%d,%d,%d,%.6f,%d,%.6f\n",
+                (unsigned long)ssd->completed_request_count,
+                (unsigned long)(ssd->completed_request_count / WIN),
+                0, P_cur, cur_r, CAP, parity_pct, borrow_out, borrow_ratio);
+        fflush(ssd->borrowfile);
+    }
+
+    /* ---------- Warm-up：只跳过前几个窗口（不要用 ghost 节点数判断） ---------- */
+    /* 你可以改 3/5/10，推荐 5 */
+    const int WARMUP_WIN = 5;
+    if (ssd->completed_request_count < (unsigned long)WARMUP_WIN * WIN) {
+        /* warm-up 期间也可以选择 reset_access_count；看你要不要 */
+        reset_access_count(ssd->dram->buffer->buffer_head);
+        reset_access_count(ssd->dram->databuffer->buffer_head);
         return;
     }
+
+    /* 1) 计算目标写容量 target_w (= best_j) */
+    int target_w = optimize_cache_allocation(ssd);
+    if (target_w < 0) exit(-1);
 
     /* 防御：确保 target 在 [0, CAP] */
     if (target_w < 0) target_w = 0;
     if (target_w > CAP) target_w = CAP;
 
-    ssd->max_profit_index = target_w;
+    /* ---------- 目标平滑：EMA（指数滑动平均）---------- */
+    /* alpha 越大越“跟得紧”，越小越平滑；推荐 0.2~0.4 */
+    const double alpha = 0.30;
 
-    printf("target_w(best_j):%d\n", target_w);
-    printf("cur_w:%d cur_r:%d CAP:%d\n", cur_w, cur_r, CAP);
+    /* 你需要在 ssd_info 里加两个字段（下面我会告诉你加哪两个）：
+         int ema_inited;
+         double ema_target_w;
+    */
+    if (!ssd->ema_inited) {
+        ssd->ema_target_w = (double)target_w;
+        ssd->ema_inited = 1;
+    } else {
+        ssd->ema_target_w = alpha * (double)target_w + (1.0 - alpha) * ssd->ema_target_w;
+    }
+    int target_smooth = (int)(ssd->ema_target_w + 0.5);
 
-    /* 3) 最小配额 ---分到什么时候不分 */
-    int MIN_W = CAP / 10;
-    int MIN_R = 1;
+    /* 2) 最小配额 */
+    int MIN_W = CAP / 10;   /* parity 下限：10% */
+    int MIN_R = 364;        /* read 下限：你也可以改成 CAP/10 或 max(CAP/10, 364) */
 
-    /* 4) 迁移速率：每窗口最多迁移 MAX_STEP 页 */
-//    int MAX_STEP = CAP / 50;   /* ~160 when CAP=8064 */
-//    if (MAX_STEP < 16) MAX_STEP = 16;
+    /* 3) 迟滞：差值太小不动 */
+    int H = CAP / 300;   // 约 26（CAP=8064）
+    if (H < 8) H = 8;
 
-    /* 5) 迟滞 + 迁移 */
-    int H = 64;
-    int diff = target_w - cur_w;
-    int absdiff = iabs_int(diff);
 
+    /* 4) 限速：每窗口最多迁移 MAX_STEP 页 */
+    int div = (ssd->step_div > 0) ? ssd->step_div : 100;
+    int MAX_STEP = CAP / div;     /* 例如 div=100 => 1% */
+    if (MAX_STEP < 8) MAX_STEP = 8;
+
+    int diff = target_smooth - cur_w;
+    int absdiff = (diff < 0) ? -diff : diff;
+
+    printf("target_w(raw):%d target_w(ema):%d cur_w:%d cur_r:%d CAP:%d\n",
+           target_w, target_smooth, cur_w, cur_r, CAP);
     printf("diff target-cur_w = %d\n", diff);
 
+    int moved = 0;  // 新增：统计本窗口迁移页数
     if (absdiff >= H) {
         int step = absdiff;
-       // if (step > MAX_STEP) step = MAX_STEP;
+        if (step > MAX_STEP) step = MAX_STEP;
+
+
 
         while (step-- > 0) {
             cur_w = (int)ssd->dram->buffer->current_limit;
 
-            if (target_w > cur_w) {
-                /* 给写扩：从读挪 1 页到写 */
+            if (target_smooth > cur_w) {
+                /* 给 parity 扩：从 read 挪 1 页到 parity */
                 if ((int)ssd->dram->databuffer->current_limit <= MIN_R) break;
+                /* 建议让 Evict_one_node 返回是否成功；这里先按你原函数 */
                 Evict_one_node(ssd, ssd->dram->databuffer);
-            } else if (target_w < cur_w) {
-                /* 给读扩：从写挪 1 页到读 */
+                moved++;
+            } else if (target_smooth < cur_w) {
+                /* 给 read 扩：从 parity 挪 1 页到 read */
                 if ((int)ssd->dram->buffer->current_limit <= MIN_W) break;
                 Evict_one_node(ssd, ssd->dram->buffer);
+                moved++;
             } else {
                 break;
             }
         }
-        printf("cur limit after split:parity %d, read %d\n",ssd->dram->buffer->current_limit, ssd->dram->databuffer->current_limit);
+
+        printf("cur limit after split: parity %d, read %d\n",
+               ssd->dram->buffer->current_limit, ssd->dram->databuffer->current_limit);
+        /* --- 记录调整后的分配（phase=1）--- */
+        if (ssd->borrowfile) {
+            int P_base = ssd->parity_base_limit;
+            int P_cur  = (int)ssd->dram->buffer->current_limit;
+            int R_cur  = (int)ssd->dram->databuffer->current_limit;
+            int CAP2   = P_cur + R_cur;
+
+            int borrow_out = (P_cur < P_base) ? (P_base - P_cur) : 0;
+            double borrow_ratio = (P_base > 0) ? ((double)borrow_out / (double)P_base) : 0.0;
+            double parity_pct   = (CAP2 > 0) ? ((double)P_cur / (double)CAP2) : 0.0;
+
+            fprintf(ssd->borrowfile, "%lu,%lu,%d,%d,%d,%d,%.6f,%d,%.6f\n",
+                    (unsigned long)ssd->completed_request_count,
+                    (unsigned long)(ssd->completed_request_count / WIN),
+                    1, P_cur, R_cur, CAP2, parity_pct, borrow_out, borrow_ratio);
+            fflush(ssd->borrowfile);
+        }
     }
 
-    /* 6) 衰减/清零（选一个） */
-//    decay_access_count(ssd->dram->buffer->buffer_head);
-//    decay_access_count(ssd->dram->databuffer->buffer_head);
 
-    // 或者：清零-----指的是 reset为 1
+    /* --- oscillation stats: deltaP based on final P_cur after adjustment --- */
+    int P_cur_final = (int)ssd->dram->buffer->current_limit;
+    int deltaP = 0;
+
+    if (ssd->last_window_inited) {
+        long long d = (long long)P_cur_final - (long long)ssd->last_window_parity;
+        if (d < 0) d = -d;
+        deltaP = (int)d;
+
+        ssd->deltaP_sum += (unsigned long long)deltaP;
+        ssd->deltaP_cnt += 1;
+        if ((unsigned long long)deltaP > ssd->deltaP_max)
+            ssd->deltaP_max = (unsigned long long)deltaP;
+    } else {
+        ssd->last_window_inited = 1;
+    }
+    ssd->last_window_parity = P_cur_final;
+
+    double mean_deltaP = (ssd->deltaP_cnt > 0)
+                         ? ((double)ssd->deltaP_sum / (double)ssd->deltaP_cnt)
+                         : 0.0;
+
+    /* --- convergence: first window where |P - target| < H for K consecutive windows --- */
+    const int K = 3;
+    int abs_err = target_smooth - P_cur_final;
+    if (abs_err < 0) abs_err = -abs_err;
+
+    if (!ssd->conv_inited) {
+        if (abs_err < H) {
+            ssd->conv_streak++;
+            if (ssd->conv_streak >= K) {
+                ssd->conv_inited = 1;
+                ssd->conv_win = (int)(ssd->completed_request_count / WIN); // 当前窗口编号
+            }
+        } else {
+            ssd->conv_streak = 0;
+        }
+    }
+
+    if (ssd->sensefile) {
+        int R_cur_final = (int)ssd->dram->databuffer->current_limit;
+        int CAP_final = P_cur_final + R_cur_final;
+
+        /* moved：如果你把 moved 定义在 if(absdiff>=H) 里，这里需要兼容。
+           最简单：在 if(absdiff>=H) 外面先 int moved=0; 然后在里面累加。
+        */
+
+        fprintf(ssd->sensefile,
+                "%lu,%lu,%d,%d,%d,%d,%d,%d,%d,%d,%d,%d,%d,%.6f,%llu,%d\n",
+                (unsigned long)ssd->completed_request_count,
+                (unsigned long)(ssd->completed_request_count / WIN),
+                ssd->step_div,
+                1,                    /* phase=1: after adjustment */
+                P_cur_final,
+                R_cur_final,
+                CAP_final,
+                target_w,
+                target_smooth,
+                H,
+                abs_err,
+                moved,                /* moved pages this window */
+                deltaP,
+                mean_deltaP,
+                ssd->deltaP_max,
+                ssd->conv_win
+        );
+        fflush(ssd->sensefile);
+    }
+
+    /* 统计衰减/清零（你现在用 reset） */
     reset_access_count(ssd->dram->buffer->buffer_head);
     reset_access_count(ssd->dram->databuffer->buffer_head);
-
 }
-
 
 
 
@@ -3027,6 +3298,9 @@ void statistic_output(struct ssd_info *ssd) {
             (double) ssd->read_req_countAll / (double) ssd->write_request_count);
     fprintf(ssd->statisticfile, "ssd->read_req_countAll_for_avg_write %.2f\n",
             (double) ssd->read_req_countAll / (double) ssd->write_sub_countall);
+    fprintf(ssd->statisticfile,
+            "avg_wait_read_sub_at_write_sub %.4f\n",
+            (double)ssd->read_req_countAll_2 / (double)ssd->write_sub_countall_2);
     fprintf(ssd->statisticfile, "moti1 %f %f\n", (double) ssd->max / ((double) (ssd->countMoti)),
             (double) ssd->min / ((double) (ssd->countMoti)));
     fprintf(ssd->statisticfile, "moti2 %f\n", (double) ssd->distanceMoti / ((double) (ssd->distanceCountMoti)));
@@ -3037,6 +3311,9 @@ void statistic_output(struct ssd_info *ssd) {
     fclose(ssd->gcCreateRequest);
     fclose(ssd->motivateFile);
     fclose(ssd->latencyfile);//已改
+    fclose(ssd->borrowfile);//已改
+    fclose(ssd->sensefile);
+    fclose(ssd->queuefile);
     printf("\n");
 
     unsigned long long chan[ssd->parameter->channel_number];

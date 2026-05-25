@@ -1039,6 +1039,19 @@ creat_sub_request(struct ssd_info *ssd, unsigned int lpn, int size, unsigned int
 
         }
 
+        if (lpn != ssd->stripe.checkLpn) {
+            unsigned long long q_wait_read = 0;
+            for (int ch = 0; ch < ssd->parameter->channel_number; ch++) {
+                q_wait_read += ssd->chanSubRLenNow[ch];
+            }
+
+            ssd->write_sub_countall_2++;
+            ssd->read_req_countAll_2 += q_wait_read;
+
+            // 记录每次样本，用于画CDF/箱线图
+            fprintf(ssd->queuefile, "wait_read_sub_at_write_sub %llu\n", q_wait_read);
+        }
+
 
     } else {
         free(sub->location);
